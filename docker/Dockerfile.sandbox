@@ -1,0 +1,11 @@
+# Image used for every sandbox container (code agent + terminal agent).
+# Built automatically on first run:  docker build -f docker/Dockerfile.sandbox -t sandbox-agent:latest docker
+FROM python:3.11-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential curl git ca-certificates make \
+ && rm -rf /var/lib/apt/lists/*
+
+# Pre-set pip so that a plain `pip install pkg` lands in the shared workspace (wheels only).
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1
+WORKDIR /work
