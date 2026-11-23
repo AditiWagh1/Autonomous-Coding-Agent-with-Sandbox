@@ -24,7 +24,8 @@ Two agents on top of one hardened sandbox:
     python -m evals.runner [--skip-network]             # benchmark: "resolved X% of runtime errors within 3 attempts"
 
 ## Deploy
-See DEPLOY.md (why Render cannot run Docker, and three working alternatives).
+See DEPLOY.md: public demo on Render + E2B (no API key needed from visitors), fair-use limits, checklist.
+Key environment variables: GEMINI_API_KEY, GEMINI_MODEL, SANDBOX_BACKEND (docker|e2b), E2B_API_KEY, PUBLIC_DEMO, DAILY_RUN_CAP, APP_PASSWORD.
 
 ## Safety model
 RUN/terminal containers: non-root, all capabilities dropped, read-only root FS, 256-512 MB RAM, 1 CPU, 64-128 PIDs,

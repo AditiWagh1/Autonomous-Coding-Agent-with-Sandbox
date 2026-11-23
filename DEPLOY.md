@@ -1,94 +1,89 @@
-# Deploying the Autonomous Coding Agent
+# Deploying the Autonomous Coding Agent (public demo)
 
-## 1. Why Render's free plan cannot run the Docker sandbox
+## The professional setup in one picture
 
-Your app launches a **new container for every run** (`docker.from_env()`). That needs access to a Docker
-daemon. A PaaS container only has that in two ways, and both are unavailable or unsafe:
+```
+Visitor (LinkedIn link)
+        │  HTTPS
+        ▼
+Render web service  ── runs app.py only. Holds your keys as secrets, enforces limits.
+        │  API calls                      │  API calls
+        ▼                                 ▼
+Google Gemini  (server-side key)      E2B micro-VM  (runs the model-written code, offline)
+```
 
-| Technique | What it needs | Verdict |
-|---|---|---|
-| **Docker-in-Docker (DinD)** | the outer container must run `--privileged` | Render does not allow privileged containers (Render staff say so on their community forum). |
-| **Docker-out-of-Docker** (mount `/var/run/docker.sock`) | access to the host's daemon | Not offered on Render. Even where it is possible, whoever controls the socket is **root on the host**, so model-written code that escapes would own the machine. Never mount the socket into a public-facing app. |
+* **Visitors never enter an API key.** The app uses your key from the server's environment; it is never sent to the browser.
+* **Model-written code never runs on the web server.** It runs in a separate E2B micro-VM. No Docker socket, no privileged container, nothing to escape into.
+* **Public mode is deliberately conservative**: offline sandbox, no package installs, short time limits, fair-use caps. The full feature set (internet scraping, workspace, C/C++) is shown in your demo video and on GitHub.
 
-So the security rule is not an obstacle to work around, it is the reason the deployment must use
-**VM-level isolation** (a real VM, or a micro-VM service) instead of containers-inside-your-web-app.
+Why not Docker on Render? Render cannot run privileged containers or expose a Docker daemon, and mounting a Docker socket into a public app would give an attacker root on the host. Micro-VM isolation is the correct pattern for strangers' code.
 
-## 2. Pick one of three deployments (all free)
+## Step 1: test the cloud backend on your laptop first (30 min)
 
-| | A. Cloud VM with Docker (recommended for full features) | B. Render (UI) + E2B micro-VMs (easiest URL) | C. Your laptop + tunnel (safest demo day) |
-|---|---|---|---|
-| Where the app runs | A free VM you control, e.g. Oracle Cloud *Always Free* | Render free web service | Your PC |
-| Where model code runs | Docker containers on that VM (sibling containers, no socket inside any container) | E2B Firecracker micro-VM | Docker Desktop |
-| Terminal agent with real offline/online split | Yes (physical split) | Yes, but internet is per-session, not per-command | Yes |
-| Cost | Free tier; needs a card for ID checks | Free: E2B Hobby has a one-time $100 credit, no card | Free |
-| Risk | You maintain a server | Free tier limits (1 h sessions, credits run out) | PC must stay on |
-
-Oracle's free ARM VM changed over time (sources report 4 OCPU/24 GB, and at least one reports a cut to
-2 OCPU/12 GB) and "out of capacity" errors are common. Check Oracle's *Always Free Resources* page before relying on it.
-Any 1-2 GB VPS works the same way.
-
----
-
-## 3A. Cloud VM with Docker
-
-The app runs **directly on the VM** (not inside a container) so no container ever needs the Docker socket.
+The E2B backend is written against the E2B v2 Python SDK and has not been run against a real account, so verify it before anyone else can see it.
 
 ```bash
-# on the VM (Ubuntu), as a normal user
-sudo apt update && sudo apt install -y docker.io python3-venv git
-sudo usermod -aG docker $USER && newgrp docker
-git clone <your-repo> sandbox && cd sandbox
-python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-docker build -f docker/Dockerfile.sandbox -t sandbox-agent:latest docker      # one-time (or let the app build it)
-
-sudo BRIDGE_NET=172.17.0.0/16 ./deploy/firewall-egress.sh                      # block metadata/LAN/host from sandboxes
-
-export GEMINI_API_KEY=...  GEMINI_MODEL=gemini-3.8-flash  APP_PASSWORD='choose-a-long-one'
-streamlit run app.py --server.port 8501 --server.address 127.0.0.1
-```
-Expose it with a tunnel (no open ports): `cloudflared tunnel --url http://localhost:8501`, or put Caddy/nginx with HTTPS in front.
-Run it under `systemd` or `tmux` so it survives logouts.
-
-Checklist before sharing the URL:
-- `APP_PASSWORD` is set (anyone with the link can otherwise run code and burn **your** Gemini quota).
-- `deploy/firewall-egress.sh` applied and verified; the VM has no secrets on disk other than the API keys.
-- Only ports 22 (key login) and your reverse proxy are open.
-- Run `python -m evals.security_tests` on the VM and keep the output for your report.
-
-## 3B. Render (UI) + E2B (execution)
-
-1. Create an E2B account (free Hobby plan) and copy the API key.
-2. Push the repo to GitHub. On Render: **New > Web Service**, runtime *Python*.
-   - Build command: `pip install -r requirements.txt -r requirements-e2b.txt`
-   - Start command: `streamlit run app.py --server.port $PORT --server.address 0.0.0.0`
-3. Environment variables: `SANDBOX_BACKEND=e2b`, `E2B_API_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-3.8-flash`, `APP_PASSWORD`.
-4. Free Render services sleep when idle, so the first request after a pause is slow: open the URL a few minutes before your demo.
-
-Notes for this backend (put these in your report as limitations):
-- The E2B code was written against the v2 Python SDK and could not be tested against a live account here; the few SDK calls are marked `[SDK]` in `sandbox/e2b_backend.py`. Check that `gcc`/`g++` exist in your sandbox template (`which gcc` via the terminal agent) or the C/C++ options will fail.
-- Internet is chosen **when the sandbox starts** (the "Allow internet" box, or any pre-approved package). Pip installs therefore need internet on for the whole session.
-- Memory/CPU/time limits come from E2B, not from this repository.
-
-## 3C. Laptop + tunnel
-
-```bash
+set E2B_API_KEY=...  &  set GEMINI_API_KEY=...              (Windows; use export on mac/linux)
+set SANDBOX_BACKEND=e2b & set PUBLIC_DEMO=1 & set ENABLED_LANGUAGES=python
 streamlit run app.py
-cloudflared tunnel --url http://localhost:8501     # or: ngrok http 8501
 ```
-Same security as local use. Set `APP_PASSWORD` first because the URL is public while the tunnel runs.
+Run the four built-in examples in both modes. If something fails, the E2B calls are marked `[SDK]` in `sandbox/e2b_backend.py`; send me the error text. To enable C/C++ later, run the terminal example "C primes" and confirm `gcc` exists in the E2B sandbox, then add `c,cpp` to `ENABLED_LANGUAGES`.
 
-## 3D. Public demo checklist (any option)
+## Step 2: GitHub
 
-- Set `APP_PASSWORD` and share it only with people you trust: the link is public, so without it anyone can run code and use your Gemini quota.
-- Set `DISABLE_INTERNET_OPTION=1` on a public server. This hides the internet checkbox and refuses every networked command, so strangers cannot use your connection for scraping or attacks. Keep it off only for your own supervised demo.
-- Quick tunnels (`cloudflared tunnel --url ...`) give a random, temporary address that stops working when you close the command. Only a named tunnel or a hosted service gives a permanent link.
-- On Windows/Docker Desktop the Linux firewall script does not apply, which is one more reason to keep internet off for public use.
+Push the project to a GitHub repository (public is fine). Before pushing check that no key is in any file (`.env` is already in `.gitignore`), and add screenshots plus a short architecture section to the README.
 
-## 4. Security summary you can cite
+## Step 3: Render
 
-- Model-written code never runs in the web app process; it runs in a container (or micro-VM) that is non-root, has no capabilities, a read-only root filesystem, CPU/RAM/PID/time limits and **no network** unless you opt in.
-- The terminal agent's long-lived container is always offline; commands that need the internet run in a separate short-lived container that shares only the workspace folder.
-- Package installs are human-approved, validated against a strict name pattern and wheel-only (no `setup.py` execution).
-- The command policy (block/ask/auto) is defence in depth, not the boundary; the containers are the boundary.
-- Residual risks: container escapes via kernel bugs (the reason for VM-level isolation in public deployments), abuse of an opted-in internet connection (scraping sites you should not, hitting third parties), and quota exhaustion (mitigated by `APP_PASSWORD`).
+1. Create an E2B account (free Hobby plan) and a Render account.
+2. Render: **New > Blueprint**, select the repo. `render.yaml` creates the service. Paste `GEMINI_API_KEY` and `E2B_API_KEY` when asked, and fill `GITHUB_URL` and `FEEDBACK_URL`.
+3. Wait for the build, open the URL, run all examples once. That is your live link.
+
+## Gemini quota, cost and privacy (read before posting)
+
+* A key shared by everyone has one quota. The free tier is easy to exhaust, so the app caps runs (below) and shows a friendly "at capacity" message instead of an error.
+* Free-tier content may be used by Google to improve its products (check the current Gemini API terms). The app tells visitors not to enter personal data. If you want to avoid that, use a billing-enabled key with a low budget alert.
+* Create a **separate key just for the demo** so you can revoke it without touching your other projects.
+
+## Fair-use controls (environment variables)
+
+| Variable | Public default | Meaning |
+|---|---|---|
+| `PUBLIC_DEMO` | `1` on Render | Hides key/model/permission settings, locks internet and installs, fixes safe limits. |
+| `MAX_RUNS_PER_SESSION` | 5 | Runs per visit (a page reload starts a new visit). |
+| `DAILY_RUN_CAP` | 150 | All visitors together; this is what really protects your quota and credits. |
+| `RUN_COOLDOWN_SEC` | 10 | Minimum gap between runs per visit. |
+| `MAX_CONCURRENT_RUNS` | 3 | Simultaneous code runs. |
+| `ENABLED_MODES` | `code,terminal` | Use `code` to show only the code agent. |
+| `ENABLED_LANGUAGES` | all | e.g. `python` until C/C++ is verified on E2B. |
+| `APP_PASSWORD` | unset | Optional: private preview for your team before going public. |
+
+These limits reset when the server restarts, and they are not per-person (no accounts), so treat them as budget protection rather than abuse-proof security.
+
+## Cold starts on Render's free plan
+
+Free web services spin down after 15 minutes without traffic and take up to about a minute to wake up (Render's docs), and Render can restart them at any time. Visitors from a LinkedIn post will often hit a sleeping app. Options: open the link yourself a few minutes before posting; ping `/_stcore/health` every ~10 minutes with a free cron service (uses your 750 free monthly instance hours, enough for one always-on service); or pay for an always-on instance. Mention in the post that the first load may take a minute.
+
+## Pre-launch checklist
+
+- [ ] E2B backend tested locally (Step 1), all examples pass.
+- [ ] `PUBLIC_DEMO=1`, caps set, demo-only Gemini key, E2B budget checked.
+- [ ] Private preview with `APP_PASSWORD` for your team first; remove it to go public.
+- [ ] Opened the live link on your phone.
+- [ ] README has screenshots, architecture, safety model and limitations.
+- [ ] A 60-90 second screen recording of the full local version (scraping, terminal approvals, blocked `sudo`) for LinkedIn.
+
+## Other deployment options
+
+* **VM with Docker** (e.g. Oracle Always Free, any VPS): full features including real offline/online container split. Run the app directly on the VM (not in a container), run `deploy/firewall-egress.sh`, set `APP_PASSWORD`, `PUBLIC_DEMO=1`, and expose it through a tunnel or HTTPS proxy. More setup and a larger attack surface than E2B for strangers' code.
+* **Laptop + tunnel** (`cloudflared tunnel --url http://localhost:8501`): good for a live presentation; the link is temporary and works only while your PC runs.
+
+## Security summary for your report
+
+* Generated code runs in a micro-VM (cloud) or a hardened container (local): non-root, no network in public mode, resource and time limits, output truncated.
+* Package installs are human-approved or disabled; wheels only; strict name validation.
+* The command policy (block/ask/auto) is defence in depth; the sandbox is the boundary.
+* Secrets live only in server environment variables; visitors cannot supply or see keys.
+* Fair-use caps, cooldown and concurrency limits protect quota and cost.
+* Residual risks: sandbox-provider vulnerabilities, per-session limits bypassed by reloading (the daily cap still holds), and shared-quota exhaustion.

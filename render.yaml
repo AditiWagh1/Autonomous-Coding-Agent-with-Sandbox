@@ -1,0 +1,30 @@
+# Render Blueprint: New > Blueprint > pick this repo. Render asks for the two secret values.
+services:
+  - type: web
+    name: autonomous-coding-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SANDBOX_BACKEND
+        value: e2b
+      - key: PUBLIC_DEMO
+        value: "1"
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: ENABLED_LANGUAGES
+        value: python            # add ",c,cpp" only after you verified gcc/g++ exist in your E2B sandbox
+      - key: DAILY_RUN_CAP
+        value: "150"
+      - key: GITHUB_URL
+        value: ""                # paste your repo link
+      - key: FEEDBACK_URL
+        value: ""                # e.g. a Google Form or a GitHub Issues link
+      - key: GEMINI_API_KEY
+        sync: false              # secret: you type it in the Render dashboard
+      - key: E2B_API_KEY
+        sync: false              # secret: you type it in the Render dashboard

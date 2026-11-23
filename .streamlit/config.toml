@@ -1,0 +1,9 @@
+[server]
+headless = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"   # hides the Deploy/dev menu for visitors

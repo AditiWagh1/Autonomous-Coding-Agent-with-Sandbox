@@ -1,3 +1,4 @@
 google-genai
 docker
 streamlit
+e2b
