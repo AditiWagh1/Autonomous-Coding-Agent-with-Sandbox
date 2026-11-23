@@ -14,7 +14,8 @@ class LLMClient:
         self,
         model_name: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
         api_key: Optional[str] = None,
-        max_api_retries: int = 4,
+        max_api_retries: int = 3,
+        fallback_models: Optional[List[str]] = None,
     ):
         # Imported lazily so the rest of the project (and unit tests) work
         # without the google-genai package installed.
@@ -28,6 +29,10 @@ class LLMClient:
         self.client = genai.Client(api_key=self.api_key)
         self._types = types
         self.max_api_retries = max_api_retries
+        # Tried in order when the main model stays overloaded (503) or rate-limited (429).
+        env_fallbacks = [m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "").split(",") if m.strip()]
+        self.fallback_models = [m for m in (fallback_models if fallback_models is not None else env_fallbacks) if m != model_name]
+        self.last_model_used = model_name
 
     def query(self, messages: List[Dict[str, str]], temperature: float = 0.2, json_mode: bool = False) -> Tuple[str, int, int]:
         """messages: [{"role": "system"|"user"|"assistant", "content": str}, ...]"""
@@ -47,22 +52,26 @@ class LLMClient:
             response_mime_type="application/json" if json_mode else None,
         )
 
-        delay = 5.0
-        response = None
-        for attempt in range(self.max_api_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model=self.model_name, contents=contents, config=config
-                )
+        response, last_error = None, None
+        for model in [self.model_name] + self.fallback_models:
+            delay = 3.0
+            for attempt in range(self.max_api_retries):
+                try:
+                    response = self.client.models.generate_content(model=model, contents=contents, config=config)
+                    self.last_model_used = model
+                    break
+                except Exception as e:  # busy servers and free-tier limits are temporary
+                    last_error = e
+                    transient = any(x in str(e) for x in ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE"))
+                    if not transient:
+                        raise
+                    if attempt < self.max_api_retries - 1:
+                        time.sleep(delay)
+                        delay *= 2
+            if response is not None:
                 break
-            except Exception as e:  # free tier hits rate limits often
-                msg = str(e)
-                transient = any(s in msg for s in ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE"))
-                if transient and attempt < self.max_api_retries - 1:
-                    time.sleep(delay)
-                    delay *= 2
-                    continue
-                raise
+        if response is None:
+            raise last_error
 
         content = response.text or ""
         usage = response.usage_metadata

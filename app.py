@@ -88,7 +88,9 @@ def show_error(e, what="The agent could not finish this run."):
     """Friendly errors for visitors; technical detail only on the server log / in local mode."""
     msg = str(e)
     print(f"[app error] {what} {e!r}", flush=True)
-    if any(t in msg for t in ("429", "RESOURCE_EXHAUSTED", "quota")):
+    if any(t in msg for t in ("503", "UNAVAILABLE")):
+        st.error("The selected AI model is under heavy load right now (reported by Google). Please try again, or pick another model in the sidebar.")
+    elif any(t in msg for t in ("429", "RESOURCE_EXHAUSTED", "quota")):
         st.error("The AI service is at capacity right now. Please try again in a few minutes.")
     elif PUBLIC:
         st.error(f"{what} Please try again in a moment.")
@@ -137,9 +139,17 @@ with st.sidebar:
     mode = st.radio("Mode", ENABLED_MODES) if len(ENABLED_MODES) > 1 else ENABLED_MODES[0]
 
     if PUBLIC:
-        model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")   # the server's key is used; visitors never enter one
+        # Everything is visible. Safe controls work; the rest are shown locked with the reason.
+        default_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+        model_choices = [m.strip() for m in os.getenv("PUBLIC_MODELS", default_model).split(",") if m.strip()] or [default_model]
+        model_name = st.selectbox("Gemini model", model_choices, help="The server's API key is used. You never need your own.")
+        st.subheader("🔐 Permissions")
+        st.checkbox("Allow internet for generated programs (scraping)", value=False, disabled=True,
+                    help="Locked in the public demo to keep the shared sandbox safe. Works in the local version: see GitHub.")
+        st.text_input("Pre-approved Python packages", disabled=True, placeholder="e.g. requests, beautifulsoup4, matplotlib",
+                      help="Locked in the public demo (installs need internet). Works in the local version: see GitHub.")
         allow_net, save_outputs, allowed = False, False, set()
-        st.info("🔒 **Public demo.** Programs run offline in an isolated sandbox with strict time and memory limits. "
+        st.info("🔒 **Public demo.** Programs run offline in an isolated sandbox. "
                 "Tasks are processed by Google's Gemini API: please do not enter personal or confidential information.")
     else:
         model_name = st.text_input("Gemini model", value=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"))
@@ -165,7 +175,10 @@ with st.sidebar:
     if mode.startswith("Code"):
         language = st.selectbox("Language", ENABLED_LANGS, format_func=lambda k: LANGUAGES[k].label)
         if PUBLIC:
-            max_retries, mem_limit, timeout_sec = 3, "256m", 15
+            max_retries = st.slider("Max attempts (self-repair)", 1, 3, 3)
+            mem_limit = st.selectbox("Memory cap", ["256m"], disabled=True,
+                                     help="Enforced per container in the local Docker version. In the cloud demo the sandbox provider manages memory.")
+            timeout_sec = st.slider("Time limit per run (s)", 5, 15, 15)
         else:
             max_retries = st.slider("Max attempts (self-repair)", 1, 5, 3)
             mem_limit = st.selectbox("Memory cap", ["256m", "512m", "1g"], index=0)
@@ -173,7 +186,11 @@ with st.sidebar:
     else:
         workspace = ""
         if PUBLIC:
-            max_steps, approval_mode = 8, "risky"
+            max_steps = st.slider("Max steps", 3, 8, 8)
+            approval_mode = st.radio(
+                "Ask before…", ["risky", "all"], format_func=lambda m: "internet/install commands only" if m == "risky" else "every command")
+            st.text_input("Workspace folder (optional)", disabled=True, placeholder="local version only",
+                          help="Mounting your own folder is available in the local Docker version: see GitHub.")
         else:
             max_steps = st.slider("Max steps", 3, 30, 15)
             approval_mode = st.radio(

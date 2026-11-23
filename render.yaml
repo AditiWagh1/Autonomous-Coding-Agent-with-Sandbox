@@ -16,6 +16,10 @@ services:
         value: "1"
       - key: GEMINI_MODEL
         value: gemini-3.8-flash
+      - key: PUBLIC_MODELS
+        value: gemini-3.5-flash-lite,gemini-3.8-flash    # the first one is the default in the dropdown
+      - key: GEMINI_FALLBACK_MODELS
+        value: gemini-3.5-flash-lite                     # tried automatically if the chosen model is overloaded
       - key: ENABLED_LANGUAGES
         value: python            # add ",c,cpp" only after you verified gcc/g++ exist in your E2B sandbox
       - key: DAILY_RUN_CAP

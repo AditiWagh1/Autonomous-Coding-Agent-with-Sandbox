@@ -135,6 +135,45 @@ def test_validate_artifacts():
     assert len(validate_artifacts({"a.txt": b""})) == 1
 
 
+def test_llm_falls_back_to_backup_model():
+    from agent.llm import LLMClient
+
+    class Resp:
+        text = "ok"
+        usage_metadata = None
+
+    class Models:
+        def __init__(self): self.tried = []
+        def generate_content(self, model, contents, config):
+            self.tried.append(model)
+            if model == "main":
+                raise RuntimeError("503 UNAVAILABLE. high demand")
+            return Resp()
+
+    class T:
+        Content = staticmethod(lambda **k: k)
+        Part = staticmethod(lambda **k: k)
+        GenerateContentConfig = staticmethod(lambda **k: k)
+
+    c = LLMClient.__new__(LLMClient)
+    c.model_name, c.fallback_models, c.max_api_retries, c._types = "main", ["backup"], 2, T
+    c.client = type("C", (), {"models": Models()})()
+    import time as _t
+    _sleep, _t.sleep = _t.sleep, lambda s: None
+    try:
+        text, p, k = c.query([{"role": "user", "content": "hi"}])
+    finally:
+        _t.sleep = _sleep
+    assert text == "ok" and c.client.models.tried == ["main", "main", "backup"] and c.last_model_used == "backup"
+
+    c.client = type("C", (), {"models": type("M", (), {"generate_content": lambda self, **k: (_ for _ in ()).throw(ValueError("400 bad request"))})()})()
+    try:
+        c.query([{"role": "user", "content": "hi"}])
+        assert False
+    except ValueError:
+        pass  # non-transient errors are raised immediately, not retried
+
+
 def test_missing_code_block():
     llm = FakeLLM(["just prose", py("print(1)")])
     s = AutonomousCodingAgent(llm, ScriptedSandbox([OK()]), verbose=False).run("t")

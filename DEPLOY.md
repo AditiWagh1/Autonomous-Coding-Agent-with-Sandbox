@@ -50,7 +50,9 @@ Push the project to a GitHub repository (public is fine). Before pushing check t
 
 | Variable | Public default | Meaning |
 |---|---|---|
-| `PUBLIC_DEMO` | `1` on Render | Hides key/model/permission settings, locks internet and installs, fixes safe limits. |
+| `PUBLIC_DEMO` | `1` on Render | Shows every control; safe ones work (model, attempts, time limit, language, examples), the rest are visible but locked with an explanation. Internet and installs stay off. |
+| `PUBLIC_MODELS` | server default | Comma-separated models visitors can choose; the first is the default. |
+| `GEMINI_FALLBACK_MODELS` | none | Backup models tried automatically when the chosen model is overloaded (503) or rate-limited (429). |
 | `MAX_RUNS_PER_SESSION` | 5 | Runs per visit (a page reload starts a new visit). |
 | `DAILY_RUN_CAP` | 150 | All visitors together; this is what really protects your quota and credits. |
 | `RUN_COOLDOWN_SEC` | 10 | Minimum gap between runs per visit. |
