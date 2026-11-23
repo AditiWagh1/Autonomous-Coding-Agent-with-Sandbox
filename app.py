@@ -7,9 +7,13 @@ Env vars:  GEMINI_API_KEY, GEMINI_MODEL, SANDBOX_BACKEND (docker|e2b), E2B_API_K
 import hmac
 import os
 
+from datetime import datetime
+from pathlib import Path
+
 import streamlit as st
 
 from agent import AutonomousCodingAgent, LLMClient, SandboxResult, TerminalAgent
+from agent.artifacts import validate_artifacts
 from agent.languages import LANGUAGES
 from sandbox import backend_name, create_runner, create_terminal
 
@@ -57,6 +61,8 @@ with st.sidebar:
     )
     if allow_net:
         st.warning("Generated code can reach the internet. Scrape politely and only sites that allow it.")
+    save_outputs = st.checkbox("Also save output files to the ./outputs folder", value=True,
+                               help="The sandbox's /output folder is temporary and lives inside Docker. This copies the files next to this project.")
     allowed_raw = st.text_input(
         "Pre-approved Python packages",
         placeholder="e.g. requests, beautifulsoup4, matplotlib",
@@ -91,12 +97,26 @@ def make_llm():
     return LLMClient(model_name=model_name)
 
 
+OUTPUT_DIR = Path("outputs")
+
+
+def save_files(files, label):
+    """Copy files to ./outputs/<label>/ on THIS computer so you can open them in Explorer."""
+    folder = OUTPUT_DIR / label
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, data in files.items():
+        (folder / os.path.basename(name)).write_bytes(data)
+    return folder.resolve()
+
+
 def show_artifacts(artifacts, key):
     for name, data in artifacts.items():
-        if name.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
+        problems = validate_artifacts({name: data})
+        if problems:
+            st.warning("⚠️ " + problems[0])
+        elif name.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
             st.image(data, caption=name)
-        else:
-            st.download_button(f"Download {name}", data, file_name=name, key=f"{key}-{name}")
+        st.download_button(f"⬇ Download {name}", data, file_name=os.path.basename(name), key=f"{key}-{name}")
 
 
 # ================================================================== CODE AGENT
@@ -134,6 +154,10 @@ if mode.startswith("Code"):
         c2.metric("Total tokens", state.total_tokens)
         c3.metric("Duration", f"{state.total_duration:.1f}s")
 
+        if state.is_success and save_outputs and state.iterations[-1].artifacts:
+            folder = save_files(state.iterations[-1].artifacts, datetime.now().strftime("code-%Y%m%d-%H%M%S"))
+            st.info(f"📁 Files saved on your computer in: {folder}")
+
         for req in state.install_requests:
             st.write(("✅ install approved: " if req["approved"] else "⛔ install denied: ") + ", ".join(req["packages"]))
         st.divider()
@@ -160,7 +184,7 @@ else:
     def end_session():
         sess = ss.pop("tsession", None)
         runner = ss.pop("trunner", None)
-        ss.pop("tagent", None); ss.pop("tpending", None)
+        ss.pop("tagent", None); ss.pop("tpending", None); ss.pop("tsaved", None)
         for obj in (sess, runner):
             try:
                 obj and obj.close()
@@ -255,6 +279,13 @@ else:
                             st.code(sample)
             st.caption(f"Tokens used: {state.total_tokens}")
             files = ss["tsession"].list_files()
+            if files and save_outputs and not ss.get("tsaved"):
+                found = {f: ss["tsession"].read_file(f) for f in files}
+                folder = save_files({k: v for k, v in found.items() if v is not None},
+                                    datetime.now().strftime("terminal-%Y%m%d-%H%M%S"))
+                ss["tsaved"] = str(folder)
+            if ss.get("tsaved"):
+                st.info(f"📁 Files saved on your computer in: {ss['tsaved']}")
             if files:
                 st.subheader("📁 Workspace files")
                 for f in files:

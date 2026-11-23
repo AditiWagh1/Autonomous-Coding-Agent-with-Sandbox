@@ -14,8 +14,9 @@ def build_system_prompt(language: str = "python", allow_network: bool = False) -
         "There is NO internet access while your program runs."
     )
     pkg = (
-        "2. ONLY if a third-party package is truly needed, add a ```requirements block listing one package per line. "
-        "The user must approve installs, so prefer the standard library."
+        "2. If the task NAMES a third-party library (e.g. requests, beautifulsoup4, matplotlib) or one is truly needed, "
+        "add a ```requirements block listing one package per line and actually use that library; the user approves installs. "
+        "Otherwise prefer the standard library."
         if lang.supports_packages else
         "2. Use only the standard library of the language. Package installs are not available."
     )
@@ -33,6 +34,7 @@ OUTPUT FORMAT (strict):
 1. One complete program inside a single ```{fence} ... ``` block.
 {pkg}
 3. Print the final answer to stdout. No interactive input, no placeholders or TODOs.
+4. Write every file in the format its extension says (a .png must be a real PNG image, never SVG or text saved under a .png name).
 
 If a previous attempt failed you will be shown the error (compiler messages, stack trace or timeout).
 Reply with the FULL corrected program, not a diff.

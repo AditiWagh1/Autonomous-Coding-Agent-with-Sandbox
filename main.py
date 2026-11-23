@@ -9,6 +9,8 @@ main.py - Command-line entry point.
 
 import argparse
 import os
+from datetime import datetime
+from pathlib import Path
 
 from agent import AutonomousCodingAgent, LLMClient, TerminalAgent
 from sandbox import create_runner, create_terminal
@@ -76,6 +78,13 @@ if __name__ == "__main__":
             print(f"\nSuccess: {s['success']} | Attempts: {s['attempts']} | Tokens: {s['total_tokens']} | {s['total_duration_sec']}s")
             if result.is_success:
                 print("Output:\n" + (s["final_output"] or ""))
+                files = result.iterations[-1].artifacts
+                if files:
+                    out = Path("outputs") / datetime.now().strftime("code-%Y%m%d-%H%M%S")
+                    out.mkdir(parents=True, exist_ok=True)
+                    for name, data in files.items():
+                        (out / os.path.basename(name)).write_bytes(data)
+                    print(f"Saved files to {out.resolve()}")
             else:
                 print("Last error:\n" + (s["final_error"] or ""))
                 print("\nWhat went wrong:\n" + (s["final_explanation"] or ""))

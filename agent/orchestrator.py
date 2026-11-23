@@ -14,6 +14,7 @@ from .prompts import (
     build_feedback_prompt,
     build_explanation_prompt,
 )
+from .artifacts import validate_artifacts
 from .languages import get_language
 from .state import AgentState, SandboxResult
 from .llm import LLMClient
@@ -101,6 +102,12 @@ class AutonomousCodingAgent:
                         code, timeout_sec=self.timeout_sec,
                         language=self.language, allow_network=self.allow_network,
                     )
+
+            if result.exit_code == 0 and not result.timed_out:
+                problems = validate_artifacts(result.artifacts)
+                if problems:  # the program "succeeded" but wrote a broken/mislabelled file
+                    result = SandboxResult(result.stdout, "OUTPUT FILE CHECK FAILED: " + "; ".join(problems),
+                                           1, result.duration, False, result.artifacts)
 
             state.add_iteration(attempt, code, result, p_tok, c_tok, packages=reqs)
             ok = result.exit_code == 0 and not result.timed_out

@@ -5,6 +5,7 @@ Run:  python test_local.py
 
 from agent import AutonomousCodingAgent, SandboxResult
 from agent.parsing import parse_response
+from agent.artifacts import validate_artifacts
 from sandbox.docker_runner import validate_packages
 
 
@@ -117,6 +118,21 @@ def test_cpp_fence_aliases_and_no_requirements_for_c():
     code, reqs = parse_response("```c++\nint main(){}\n```\n```requirements\nnumpy\n```", "cpp")
     assert code == "int main(){}" and reqs == []
     assert parse_response("```python\nprint(1)\n```", "c") == ("", [])
+
+
+def test_fake_png_is_rejected_and_repaired():
+    svg = SandboxResult("done\n", "", 0, 0.1, artifacts={"chart.png": b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"})
+    good = SandboxResult("done\n", "", 0, 0.1, artifacts={"chart.png": b"\x89PNG\r\n\x1a\n" + b"0" * 20})
+    llm = FakeLLM([py("write svg"), py("write png")])
+    s = AutonomousCodingAgent(llm, ScriptedSandbox([svg, good]), verbose=False).run("t")
+    assert s.is_success and len(s.iterations) == 2 and s.recovered
+    assert "not a valid PNG" in llm.calls[1][-1]["content"]
+
+
+def test_validate_artifacts():
+    assert validate_artifacts({"a.png": b"\x89PNG\r\n\x1a\nxx", "b.csv": b"x,y", "c.svg": b"<svg></svg>"}) == []
+    assert len(validate_artifacts({"a.png": b"GIF89a"})) == 1
+    assert len(validate_artifacts({"a.txt": b""})) == 1
 
 
 def test_missing_code_block():
