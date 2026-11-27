@@ -18,6 +18,20 @@ Google Gemini  (server-side key)      E2B micro-VM  (runs the model-written code
 
 Why not Docker on Render? Render cannot run privileged containers or expose a Docker daemon, and mounting a Docker socket into a public app would give an attacker root on the host. Micro-VM isolation is the correct pattern for strangers' code.
 
+## Full-feature deployment for your examiner (same code, password-protected)
+
+`render.yaml` defines two services from one codebase:
+
+| | Public demo | Full version |
+|---|---|---|
+| Setting | `PUBLIC_DEMO=1` | no `PUBLIC_DEMO`, `APP_PASSWORD` set |
+| Audience | LinkedIn visitors | examiner and team (they get the password) |
+| Internet toggle, pre-approved packages, installs, terminal agent with approvals, model box | locked | **live** |
+
+What still differs from the local Docker version (say this openly): the cloud sandbox has no per-container memory slider and no workspace-folder mount, and internet is chosen per session instead of per command. For 100% parity run the app on a VM with Docker (see "Other deployment options").
+
+Why the public one is restricted: unrestricted internet and installs would give strangers free outbound internet and compute from your accounts. Restricting a public endpoint to least privilege is a deliberate security decision, not a missing feature.
+
 ## Step 1: test the cloud backend on your laptop first (30 min)
 
 The E2B backend is written against the E2B v2 Python SDK and has not been run against a real account, so verify it before anyone else can see it.
@@ -75,6 +89,43 @@ Free web services spin down after 15 minutes without traffic and take up to abou
 - [ ] Opened the live link on your phone.
 - [ ] README has screenshots, architecture, safety model and limitations.
 - [ ] A 60-90 second screen recording of the full local version (scraping, terminal approvals, blocked `sudo`) for LinkedIn.
+
+## Oracle Cloud Always Free VM with Docker (full features, identical to local)
+
+Oracle's documentation (updated June 2026) lists for Always Free: one Arm VM (`VM.Standard.A1.Flex`) with 2 OCPUs and 12 GB in total, or two tiny AMD `E2.1.Micro` VMs with 1 GB each. Always Free instances must live in your home region, "out of host capacity" errors are possible (retry, try another availability domain, or upgrade to Pay As You Go, which still only charges above the free limits), and Oracle may reclaim instances that stay idle for 7 days (CPU, network and, on Arm, memory all below 20%).
+
+Scripts in `deploy/`: `server-setup.sh` (installs everything), `server-firewall.sh` (opens 80/443 and restricts sandbox egress, re-applied at every boot), `firewall-egress.sh`. Run:
+
+```bash
+git clone https://github.com/YOUR-USER/YOUR-REPO sandbox && cd sandbox
+./deploy/server-setup.sh your-name.duckdns.org
+sudo nano /etc/agent.env && sudo systemctl restart agent
+```
+
+## Two links from one server: full (private) and public (safe)
+
+After `server-setup.sh` works, create a second DuckDNS name (e.g. `yourname-demo.duckdns.org`, same IP) and run `./deploy/add-public-instance.sh yourname-demo.duckdns.org`. You then have:
+
+| Link | Access | Features |
+|---|---|---|
+| `yourname-agent.duckdns.org` | access codes only | everything |
+| `yourname-demo.duckdns.org` | anyone (LinkedIn) | offline sandbox, model choice, languages, terminal agent, fair-use limits; internet and installs locked |
+
+If `APP_PASSWORD` is empty on the full instance, anyone can use every feature including internet and installs, so never leave it empty.
+
+## AWS EC2 instead of Oracle (same scripts)
+
+The scripts are plain Ubuntu, so they work on AWS too: launch an Ubuntu 24.04 EC2 instance (at least 2 vCPU / 2 GB: for example `t3.small`; `t3.medium` is more comfortable), a 30 GB gp3 disk, and a security group allowing 22 (your IP only), 80 and 443. Point your DuckDNS name at the instance (use an Elastic IP so it survives restarts; AWS charges a small hourly fee for public IPv4 addresses), SSH in, clone the repo and run `./deploy/server-setup.sh your-name.duckdns.org`. New AWS accounts (created on or after 15 July 2025) get credits instead of the old 12-month free tier; check Billing for what applies to yours, create a budget alert, and stop (not terminate) the instance after your exam.
+
+## Same features as local, with a few server-side differences
+
+With the Docker backend the deployed app runs the same code path as your laptop: language choice, internet toggle, pre-approved packages, memory cap, terminal agent with approvals, scraping, charts. On a shared server three things behave differently by design:
+
+| Laptop | Server (`SERVER_MODE=1`) |
+|---|---|
+| "Workspace folder" takes any path on your PC | "Workspace name": a folder inside `/var/lib/agent-workspaces` (a path box on a server would expose the server's disk) |
+| Output files saved to `./outputs` | Files are delivered with download buttons (they would otherwise sit on the server) |
+| You are the only user | Resources are shared: `MAX_CONCURRENT_RUNS` limits simultaneous runs, `APP_PASSWORD` can hold several comma-separated access codes (one per person; remove a code to revoke access) |
 
 ## Other deployment options
 

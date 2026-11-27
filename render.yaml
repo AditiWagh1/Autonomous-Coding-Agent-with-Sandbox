@@ -1,4 +1,7 @@
-# Render Blueprint: New > Blueprint > pick this repo. Render asks for the two secret values.
+# Render Blueprint: New > Blueprint > pick this repo. Render asks for the secret values of each service.
+# Two services from ONE codebase:
+#   1) autonomous-coding-agent       = PUBLIC demo (safe mode, for LinkedIn)
+#   2) autonomous-coding-agent-full  = FULL features behind a password (for your examiner and team)
 services:
   - type: web
     name: autonomous-coding-agent
@@ -32,3 +35,29 @@ services:
         sync: false              # secret: you type it in the Render dashboard
       - key: E2B_API_KEY
         sync: false              # secret: you type it in the Render dashboard
+
+  - type: web
+    name: autonomous-coding-agent-full
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SANDBOX_BACKEND
+        value: e2b
+      # no PUBLIC_DEMO here: internet toggle, pre-approved packages, terminal agent and model box are all live
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_FALLBACK_MODELS
+        value: gemini-3.8-flash
+      - key: ENABLED_LANGUAGES
+        value: python            # add ",c,cpp" after confirming gcc/g++ exist in your E2B sandbox
+      - key: APP_PASSWORD
+        sync: false              # secret: choose a password and give it only to your examiner and team
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: E2B_API_KEY
+        sync: false

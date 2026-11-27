@@ -6,6 +6,7 @@ Env vars:  GEMINI_API_KEY, GEMINI_MODEL, SANDBOX_BACKEND (docker|e2b), E2B_API_K
 
 import hmac
 import os
+import re
 import threading
 import time
 
@@ -22,12 +23,12 @@ from sandbox import backend_name, create_runner, create_terminal
 st.set_page_config(page_title="Autonomous Coding Agent", layout="wide")
 
 # ---- optional password gate (set APP_PASSWORD when the app is public) -------------------
-_pw = os.getenv("APP_PASSWORD", "")
-if _pw and not st.session_state.get("auth_ok"):
+_codes = [c.strip() for c in os.getenv("APP_PASSWORD", "").split(",") if c.strip()]   # comma-separated = one code per person
+if _codes and not st.session_state.get("auth_ok"):
     st.title("🔒 Autonomous Coding Agent")
     entered = st.text_input("Password", type="password")
     if entered:
-        if hmac.compare_digest(entered, _pw):
+        if any(hmac.compare_digest(entered.encode(), c.encode()) for c in _codes):
             st.session_state["auth_ok"] = True
             st.rerun()
         else:
@@ -35,6 +36,8 @@ if _pw and not st.session_state.get("auth_ok"):
     st.stop()
 
 BACKEND = backend_name()
+SERVER_MODE = os.getenv("SERVER_MODE", "") == "1"                 # running on a shared server (Oracle/AWS), not on your laptop
+WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_ROOT", "/var/lib/agent-workspaces"))
 PUBLIC = os.getenv("PUBLIC_DEMO", "") == "1"          # public showcase mode (set on LinkedIn/Render deployments)
 NET_LOCKED = PUBLIC or os.getenv("DISABLE_INTERNET_OPTION", "") == "1"
 MAX_RUNS_PER_SESSION = int(os.getenv("MAX_RUNS_PER_SESSION", "5" if PUBLIC else "0"))   # 0 = unlimited
@@ -163,8 +166,11 @@ with st.sidebar:
         )
         if allow_net:
             st.warning("Generated code can reach the internet. Scrape politely and only sites that allow it.")
-        save_outputs = st.checkbox("Also save output files to the ./outputs folder", value=True,
-                                   help="The sandbox's /output folder is temporary and lives inside Docker. This copies the files next to this project.")
+        if SERVER_MODE:
+            save_outputs = False   # files live on the server, so visitors use the download buttons instead
+        else:
+            save_outputs = st.checkbox("Also save output files to the ./outputs folder", value=True,
+                                       help="The sandbox's /output folder is temporary and lives inside Docker. This copies the files next to this project.")
         allowed_raw = st.text_input(
             "Pre-approved Python packages",
             placeholder="e.g. requests, beautifulsoup4, matplotlib",
@@ -181,7 +187,11 @@ with st.sidebar:
             timeout_sec = st.slider("Time limit per run (s)", 5, 15, 15)
         else:
             max_retries = st.slider("Max attempts (self-repair)", 1, 5, 3)
-            mem_limit = st.selectbox("Memory cap", ["256m", "512m", "1g"], index=0)
+            if BACKEND == "docker":
+                mem_limit = st.selectbox("Memory cap", ["256m", "512m", "1g"], index=0)
+            else:  # cloud sandbox: memory is set by the provider, so do not show a control that would do nothing
+                mem_limit = "256m"
+                st.caption("Memory limit: managed by the cloud sandbox provider.")
             timeout_sec = st.slider("Time limit per run (s)", 5, 60, 15)
     else:
         workspace = ""
@@ -195,7 +205,11 @@ with st.sidebar:
             max_steps = st.slider("Max steps", 3, 30, 15)
             approval_mode = st.radio(
                 "Ask before…", ["risky", "all"], format_func=lambda m: "internet/install commands only" if m == "risky" else "every command")
-            if BACKEND == "docker":
+            if BACKEND == "docker" and SERVER_MODE:
+                workspace = st.text_input(
+                    "Workspace name (optional)", placeholder="blank = private temporary workspace",
+                    help="Files persist on the server under this name between sessions. Letters, numbers, - and _ only.")
+            elif BACKEND == "docker":
                 workspace = st.text_input(
                     "Workspace folder (optional)", placeholder="blank = private temp folder",
                     help="The agent can read, change and delete everything in this folder, and nothing outside it. Use a COPY of a project.")
@@ -344,7 +358,16 @@ else:
             st.stop()
         try:
             runner = create_runner(allow_network=allow_net)
-            session = create_terminal(runner, workspace=workspace or None).start()
+            ws_path = workspace or None
+            if SERVER_MODE and workspace:
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", workspace):
+                    st.error("Workspace name: use only letters, numbers, - and _ (max 40 characters).")
+                    st.stop()
+                folder = WORKSPACE_ROOT / workspace
+                folder.mkdir(parents=True, exist_ok=True)
+                os.chmod(folder, 0o777)       # the sandbox user (nobody) must be able to write here
+                ws_path = str(folder)
+            session = create_terminal(runner, workspace=ws_path).start()
             if NET_LOCKED:  # refuse every networked command, whatever the user clicks
                 _orig_run = session.run
 
